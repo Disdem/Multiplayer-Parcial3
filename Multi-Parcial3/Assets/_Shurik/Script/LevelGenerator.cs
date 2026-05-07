@@ -46,6 +46,25 @@ public class LevelGenerator : MonoBehaviour
         if (activeChunks.Count > 0)
         {
             GameObject oldestChunk = activeChunks.Peek(); // Mirar el primero de la fila
+
+            // ---> LA PROTECCIÓN <---
+            // Si el objeto ya fue destruido por otra cosa (ej. cambio de escena o red), 
+            // lo sacamos de la fila inmediatamente y cancelamos esta lectura para evitar el Crash.
+            if (oldestChunk == null)
+            {
+                activeChunks.Dequeue();
+                return;
+            }
+
+            // Si llegamos aquí, el objeto sí existe y es seguro leer su transform
+            if (oldestChunk.transform.position.x + chunkLength < camTransform.position.x - destroyDistanceBehind)
+            {
+                DestroyOldestChunk();
+            }
+        }
+        if (activeChunks.Count > 0)
+        {
+            GameObject oldestChunk = activeChunks.Peek(); // Mirar el primero de la fila
             if (oldestChunk.transform.position.x + chunkLength < camTransform.position.x - destroyDistanceBehind)
             {
                 DestroyOldestChunk();

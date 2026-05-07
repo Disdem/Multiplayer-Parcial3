@@ -1,40 +1,40 @@
 using UnityEngine;
+using Unity.Netcode;
 
 public class MathObstacle : MonoBehaviour
 {
     [Header("Movimiento (Péndulo)")]
-    [Tooltip("Eje en el que se moverá. Ej: Y=1 para Arriba/Abajo")]
     public Vector3 moveAxis = new Vector3(0, 1, 0);
-    public float moveDistance = 0f; // Ponlo en 0 si no quieres que se mueva
+    public float moveDistance = 0f;
     public float moveSpeed = 2f;
 
     [Header("Rotación (Constante)")]
-    [Tooltip("Eje de rotación. Ej: Z=1 para girar como manecilla de reloj")]
     public Vector3 rotationAxis = new Vector3(0, 0, 0);
-    public float rotationSpeed = 0f; // Ponlo en 0 si no quieres que rote
+    public float rotationSpeed = 0f;
 
     private Vector3 startPosition;
 
     void Start()
     {
-        // Guardamos la posición inicial para que no se vaya volando al infinito
         startPosition = transform.position;
     }
 
     void Update()
     {
-        // 1. Movimiento Suave (Seno)
+        // AÑADIDO: Si hay red, usamos el reloj del servidor para sincronización perfecta
+        float timeToUse = (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+                          ? (float)NetworkManager.Singleton.ServerTime.Time
+                          : Time.time;
+
         if (moveDistance > 0)
         {
-            // Mathf.Sin crea una onda que va de -1 a 1 de forma infinita
-            float offset = Mathf.Sin(Time.time * moveSpeed) * moveDistance;
+            float offset = Mathf.Sin(timeToUse * moveSpeed) * moveDistance;
             transform.position = startPosition + moveAxis * offset;
         }
 
-        // 2. Rotación Continua
         if (rotationSpeed > 0 || rotationSpeed < 0)
         {
-            transform.Rotate(rotationAxis * rotationSpeed * Time.deltaTime);
+            transform.Rotate(rotationAxis * rotationSpeed * Time.deltaTime); // La rotación constante se mantiene igual
         }
     }
 }

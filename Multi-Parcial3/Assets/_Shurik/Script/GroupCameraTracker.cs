@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Netcode;
 
@@ -9,45 +10,42 @@ public class GroupCameraTracker : MonoBehaviour
     public Vector3 offset = new Vector3(0, 5, -15);
 
     [Header("Mecánica Constructiva")]
-    public GameObject helpfulPlatformPrefab; // Asigna tu prop azul/blanco aquí
+    public GameObject helpfulPlatformPrefab;
 
     [Header("Game Feel")]
     public float shakeMagnitude = 0.4f;
     private float currentShakeTime = 0f;
     private Vector3 basePosition;
-
     private Vector3 velocity = Vector3.zero;
-
-
 
     void Start()
     {
         if (cam == null) cam = Camera.main;
-        basePosition = transform.position; // Guardar la posición inicial
+        basePosition = transform.position;
     }
 
     void LateUpdate()
     {
+        RunnerController[] rawPlayers = FindObjectsByType<RunnerController>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 
+        // AÑADIDO: Limpiar jugadores nulos o destruidos por la red
+        List<RunnerController> alivePlayers = new List<RunnerController>();
+        foreach (var p in rawPlayers)
+        {
+            if (p != null && p.gameObject.activeInHierarchy) alivePlayers.Add(p);
+        }
 
-        // 1. Buscar a los jugadores vivos en la escena
-        RunnerController[] alivePlayers = FindObjectsByType<RunnerController>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        if (alivePlayers.Count == 0) return;
 
-        if (alivePlayers.Length == 0) return;
-
-        // 2. Calcular el centro de la acción
         Vector3 targetPosition = GetCenterPoint(alivePlayers) + offset;
 
-        // Regla estricta: La cámara NUNCA retrocede. Si el grupo se retrasa, la cámara no perdona.
         if (targetPosition.x < transform.position.x)
         {
             targetPosition.x = transform.position.x;
         }
 
-        // 3. Calcular la posición base (Lógica pura, sin temblores)
         basePosition = Vector3.SmoothDamp(basePosition, targetPosition, ref velocity, smoothTime);
 
-        // 4. Aplicar el temblor SOLO al aspecto visual (transform)
         if (currentShakeTime > 0)
         {
             transform.position = basePosition + Random.insideUnitSphere * shakeMagnitude;
@@ -55,10 +53,9 @@ public class GroupCameraTracker : MonoBehaviour
         }
         else
         {
-            transform.position = basePosition; // Posición normal y suave
+            transform.position = basePosition;
         }
 
-        // 5. Ejecutar las eliminaciones (Solo el servidor tiene permiso de matar)
         bool canKill = (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
                        ? NetworkManager.Singleton.IsServer
                        : true;
@@ -69,35 +66,39 @@ public class GroupCameraTracker : MonoBehaviour
         }
     }
 
-
-    Vector3 GetCenterPoint(RunnerController[] players)
+    Vector3 GetCenterPoint(List<RunnerController> players)
     {
-        if (players.Length == 1) return players[0].transform.position;
+        if (players.Count == 1) return players[0].transform.position;
 
         var bounds = new Bounds(players[0].transform.position, Vector3.zero);
-        for (int i = 1; i < players.Length; i++)
+        for (int i = 1; i < players.Count; i++)
         {
             bounds.Encapsulate(players[i].transform.position);
         }
         return bounds.center;
     }
 
-    void CheckEliminations(RunnerController[] players)
+    void CheckEliminations(List<RunnerController> players)
     {
-        foreach (var player in players)
+        // Se itera en reversa por si modificamos la lista al matar
+        for (int i = players.Count - 1; i >= 0; i--)
         {
+            RunnerController player = players[i];
+            if (player == null) continue;
+
             Vector3 viewportPos = cam.WorldToViewportPoint(player.transform.position);
 
-            // AÑADIDO: Ahora también mueres si te sales por abajo de la pantalla (viewportPos.y)
             if (viewportPos.x < -0.05f || viewportPos.y < -0.05f)
             {
                 ExecuteConstructiveDeath(player);
             }
         }
     }
-    void ExecuteConstructiveDeath(RunnerController player)
+
+    // IMPORTANTE: Ahora es "public" para que el jugador pueda llamarla con su botón
+    public void ExecuteConstructiveDeath(RunnerController player)
     {
-        // 1. Generar la plataforma
+        // 1. Generar la plataforma donde murió
         if (helpfulPlatformPrefab != null)
         {
             GameObject platform = Instantiate(helpfulPlatformPrefab, player.transform.position, Quaternion.identity);
@@ -109,15 +110,18 @@ public class GroupCameraTracker : MonoBehaviour
             }
         }
 
-        // 2. Eliminar al jugador
+        // 2. Calcular la posición de Respawn (Al centro de la cámara y muy arriba en Y)
+        Vector3 respawnPos = new Vector3(cam.transform.position.x, cam.transform.position.y + 8f, player.transform.position.z);
+
+        // 3. Ejecutar el Respawn por red en lugar de destruirlo
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            player.GetComponent<NetworkObject>().Despawn(true);
+            player.RespawnClientRpc(respawnPos);
         }
         else
         {
-            // Modo offline: simplemente lo destruimos
-            Destroy(player.gameObject);
+            // Para cuando pruebes el juego sin internet
+            player.transform.position = respawnPos;
         }
     }
 }
